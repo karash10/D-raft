@@ -1,0 +1,85 @@
+version: "3.8"
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount entire src directory for hot-reload
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/next.config.ts:/app/next.config.ts
+    environment:
+      - NODE_ENV=development
+      # Enable polling for file watching (required for Docker on Windows/WSL)
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - gateway
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount source files for hot-reload
+      - ./gateway/index.ts:/app/index.ts
+      - ./gateway/app.ts:/app/app.ts
+      - ./gateway/ws.ts:/app/ws.ts
+      - ./gateway/leader.ts:/app/leader.ts
+      - ./gateway/types.ts:/app/types.ts
+    environment:
+      - REPLICA_URLS=http://replica1:9001,http://replica2:9002,http://replica3:9003
+      - GATEWAY_PORT=8080
+    depends_on:
+      - replica1
+      - replica2
+      - replica3
+
+  replica1:
+    container_name: node1
+    image: cosmtrek/air:latest
+    working_dir: /app
+    ports:
+      - "9001:9001"
+    volumes:
+      - ./replica1:/app
+    environment:
+      - REPLICA_ID=replica1
+      - PORT=9001
+      - PEERS=http://replica2:9002,http://replica3:9003
+
+  replica2:
+    container_name: node2
+    image: cosmtrek/air:latest
+    working_dir: /app
+    ports:
+      - "9002:9002"
+    volumes:
+      - ./replica2:/app
+    environment:
+      - REPLICA_ID=replica2
+      - PORT=9002
+      - PEERS=http://replica1:9001,http://replica3:9003
+
+  replica3:
+    container_name: node3
+    image: cosmtrek/air:latest
+    working_dir: /app
+    ports:
+      - "9003:9003"
+    volumes:
+      - ./replica3:/app
+    environment:
+      - REPLICA_ID=replica3
+      - PORT=9003
+      - PEERS=http://replica1:9001,http://replica2:9002
+
+networks:
+  default:
+    name: miniraft-network

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { upgradeWebSocket } from "hono/bun";
 import type { WSEvents } from "hono/ws";
 import type { LeaderSource } from "./leader";
@@ -19,6 +20,10 @@ export function createGatewayApp({
 
   app.get("/status", (c) => {
     return c.json({ status: "ok", currentLeader: tracker.getLeaderUrl() });
+  });
+
+  app.get("/cluster-status", cors(), (c) => {
+    return c.json({ nodes: tracker.getClusterStatus() });
   });
 
   return app;

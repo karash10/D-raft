@@ -5,6 +5,7 @@ type FetchImpl = typeof fetch;
 
 export type LeaderSource = {
   getLeaderUrl(): string | null;
+  getClusterStatus(): { peer: string; status: NodeStatus }[];
 };
 
 type LeaderTrackerOptions = {
@@ -25,6 +26,7 @@ export class LeaderTracker implements LeaderSource {
   private leaderId: string | null = null;
   private leaderUrl: string | null = null;
   private term = 0;
+  private clusterStatus: { peer: string; status: NodeStatus }[] = [];
   private readonly peers: string[];
   private readonly fetchImpl: FetchImpl;
   private readonly logger: Logger;
@@ -70,10 +72,14 @@ export class LeaderTracker implements LeaderSource {
       }),
     );
 
+    const validStatuses = statuses.filter((candidate): candidate is { peer: string; status: NodeStatus } => candidate !== null);
+    
+    // Save to instance property for Dashboard API
+    this.clusterStatus = validStatuses;
+
     // If multiple candidates claim to be Leader (e.g., during network partitions),
     // we sort by RAFT `term` in descending order. The node with the highest term is the true Leader.
-    const nextLeader = statuses
-      .filter((candidate): candidate is { peer: string; status: NodeStatus } => candidate !== null)
+    const nextLeader = validStatuses
       .filter(({ status }) => status.state === "LEADER")
       .sort((left, right) => right.status.term - left.status.term)[0];
 
@@ -122,5 +128,9 @@ export class LeaderTracker implements LeaderSource {
 
   getLeaderId() {
     return this.leaderId;
+  }
+
+  getClusterStatus() {
+    return this.clusterStatus;
   }
 }

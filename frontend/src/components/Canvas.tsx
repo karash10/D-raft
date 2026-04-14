@@ -28,6 +28,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useWebSocket, type Stroke, type LogEntry } from '../hooks/useWebSocket'
 import Toolbar from './Toolbar'
+import Dashboard from './Dashboard'
 
 
 const CANVAS_BG_COLOR = '#fefefe'
@@ -272,6 +273,10 @@ export default function Canvas() {
   // Render
   return (
     <div ref={containerRef} className={`w-full h-full relative ${isEraser ? 'cursor-cell' : 'cursor-crosshair'}`}>
+      
+      {/* Cluster Dashboard overlay */}
+      <Dashboard />
+
       <Toolbar
         selectedColor={selectedColor}
         onSelectColor={setSelectedColor}

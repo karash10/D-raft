@@ -274,9 +274,6 @@ export default function Canvas() {
   return (
     <div ref={containerRef} className={`w-full h-full relative ${isEraser ? 'cursor-cell' : 'cursor-crosshair'}`}>
       
-      {/* Cluster Dashboard overlay */}
-      <Dashboard />
-
       <Toolbar
         selectedColor={selectedColor}
         onSelectColor={setSelectedColor}

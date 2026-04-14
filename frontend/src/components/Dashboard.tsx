@@ -1,3 +1,4 @@
+"use client"
 import React, { useEffect, useState } from 'react';
 
 type NodeStatus = {
@@ -40,7 +41,7 @@ export default function Dashboard() {
   }, []);
 
   return (
-    <div className="absolute top-6 left-6 z-20 bg-white/90 backdrop-blur-sm shadow-xl border border-neutral-200 rounded-xl p-4 w-72 pointer-events-auto transition-all">
+    <div className="fixed top-6 left-6 z-20 bg-white/90 backdrop-blur-sm shadow-xl border border-neutral-200 rounded-xl p-4 w-72 pointer-events-auto transition-all">
       <h2 className="text-xs font-bold text-neutral-800 mb-3 uppercase tracking-wider flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]" />

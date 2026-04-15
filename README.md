@@ -8,6 +8,7 @@
 
 - [Overview](#overview)
 - [Architecture](#architecture)
+- [Architecture Document](#architecture-document)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 - [RAFT Protocol Specification](#raft-protocol-specification)
@@ -54,7 +55,7 @@ This mirrors the architecture used in real-world systems:
            │     Gateway      │ 
            │    (Port 8080)   │  
            └─────────┬────────┘  
-                     │  gRPC / HTTP
+                     │  HTTP / JSON RPC
           ┌──────────┼─────────────┐
           ▼          ▼             ▼
     ┌──────────┐ ┌──────────┐ ┌──────────┐
@@ -88,7 +89,7 @@ Client draws → Gateway → Leader.AppendEntries
 | Layer | Language | Framework / Libraries |
 |---|---|---|
 | Frontend | TypeScript | Next.js · Tailwind CSS · HTML5 Canvas API · native WebSocket |
-| Gateway | TypeScript (Bun) | Bun · Hono · `ws` (WebSocket) · gRPC · Zod · Pino |
+| Gateway | TypeScript (Bun) | Bun · Hono · WebSocket · Zod · Pino |
 | Replicas | Go | Fiber v2 · `air` (hot-reload) · standard library |
 | Containerization | — | Docker · docker-compose v3.8 |
 | Testing | — | `k6` (load) · `curl` / shell scripts (fault injection) |
@@ -102,19 +103,19 @@ Client draws → Gateway → Leader.AppendEntries
 ├── docker-compose.yml
 ├── README.md
 │
-├── frontend/                   # TypeScript · Next.js
-│   ├── src/
-│   │   ├── canvas.ts           # Drawing logic, stroke serialization
-│   │   ├── socket.ts           # WebSocket client, reconnect logic
-│   │   └── main.ts             # Entry point
+├── frontend/                   # TypeScript · Next.js UI
+│   ├── src/app/                # App shell and page entry
+│   ├── src/components/         # Canvas, toolbar, dashboard
+│   ├── src/hooks/              # WebSocket client hook
 │   ├── package.json
 │   └── tsconfig.json
 │
 ├── gateway/                    # TypeScript · Bun + Hono
-│   ├── index.ts                # Hono + ws WebSocket server
-│   ├── src/
-│   │   ├── leaderRouter.ts     # Tracks current leader, re-routes on failover (gRPC)
-│   │   └── broadcaster.ts      # Pushes committed strokes to all clients
+│   ├── index.ts                # Gateway bootstrap
+│   ├── app.ts                  # Routes and WebSocket upgrade
+│   ├── leader.ts               # Leader discovery and tracking
+│   ├── ws.ts                   # WebSocket forwarding + broadcast
+│   ├── types.ts                # Stroke and node-status validation
 │   ├── package.json
 │   └── tsconfig.json
 │
@@ -201,9 +202,21 @@ Follower participates normally in future AppendEntries
 
 ---
 
+## Architecture Document
+
+The submission architecture document lives at [assets/Architecture.md](/home/jeevan/Documents/uni/D-raft/assets/Architecture.md).
+
+It includes:
+
+- system overview and cluster diagram
+- request flow and Mini-RAFT design
+- API summary
+- failure-handling approach
+- deliverable mapping
+
 ## API Reference
 
-All replica RPC endpoints are accessible via HTTP/JSON and gRPC. The Gateway calls these internally via gRPC.
+All replica RPC endpoints are exposed over HTTP/JSON. The Gateway calls these internal HTTP endpoints directly.
 
 ### `POST /request-vote`
 
@@ -398,6 +411,12 @@ All replicas log key events to stdout in structured format:
 [replica3] term=4 state=LEADER    event=election_won        votes=2
 ```
 
+Captured demo evidence should be stored in [logs/README.md](/home/jeevan/Documents/uni/D-raft/logs/README.md) and the related files:
+
+- [logs/election-demo.log](/home/jeevan/Documents/uni/D-raft/logs/election-demo.log)
+- [logs/failover-demo.log](/home/jeevan/Documents/uni/D-raft/logs/failover-demo.log)
+- [logs/sync-log-demo.log](/home/jeevan/Documents/uni/D-raft/logs/sync-log-demo.log)
+
 ---
 
 ## Testing & Fault Injection
@@ -451,15 +470,26 @@ services:
   frontend:
     build: ./frontend
     ports: ["3000:3000"]
-    volumes: ["./frontend/src:/app/src"]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/"]
 
   gateway:
     build: ./gateway
     ports: ["8080:8080"]
-    volumes: ["./gateway/src:/app/src"]
     environment:
       - REPLICA_URLS=http://replica1:9001,http://replica2:9002,http://replica3:9003
-    depends_on: [replica1, replica2, replica3]
+    depends_on:
+      replica1:
+        condition: service_healthy
+      replica2:
+        condition: service_healthy
+      replica3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/status"]
 
   replica1:
     build: ./replica1
@@ -469,6 +499,8 @@ services:
       - REPLICA_ID=replica1
       - PORT=9001
       - PEERS=http://replica2:9002,http://replica3:9003
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9001/health"]
 
   replica2:
     build: ./replica2
@@ -478,6 +510,8 @@ services:
       - REPLICA_ID=replica2
       - PORT=9002
       - PEERS=http://replica1:9001,http://replica3:9003
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9002/health"]
 
   replica3:
     build: ./replica3
@@ -487,11 +521,15 @@ services:
       - REPLICA_ID=replica3
       - PORT=9003
       - PEERS=http://replica1:9001,http://replica2:9002
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9003/health"]
 
 networks:
   default:
     name: miniraft-network
 ```
+
+The actual compose file also includes bind mounts for hot reload, startup ordering via `depends_on.condition: service_healthy`, and service-level health checks for the frontend, gateway, and each replica.
 
 ---
 
@@ -504,9 +542,7 @@ networks:
 | `PEERS` | Replica | Comma-separated URLs of all other replicas |
 | `REPLICA_URLS` | Gateway | Comma-separated URLs of all replicas (for leader discovery) |
 | `GATEWAY_PORT` | Gateway | WebSocket + HTTP port (default: `8080`) |
-| `ELECTION_TIMEOUT_MIN` | Replica | Minimum election timeout in ms (default: `500`) |
-| `ELECTION_TIMEOUT_MAX` | Replica | Maximum election timeout in ms (default: `800`) |
-| `HEARTBEAT_INTERVAL` | Replica | Leader heartbeat interval in ms (default: `150`) |
+| `NEXT_PUBLIC_GATEWAY_URL` | Frontend | Browser-facing gateway URL used by dashboard polling |
 
 ---
 

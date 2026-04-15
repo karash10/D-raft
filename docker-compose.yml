@@ -14,11 +14,19 @@ services:
       - ./frontend/next.config.ts:/app/next.config.ts
     environment:
       - NODE_ENV=development
+      - NEXT_PUBLIC_GATEWAY_URL=http://localhost:8080
       # Enable polling for file watching (required for Docker on Windows/WSL)
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true
     depends_on:
-      - gateway
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   gateway:
     build:
@@ -37,13 +45,24 @@ services:
       - REPLICA_URLS=http://replica1:9001,http://replica2:9002,http://replica3:9003
       - GATEWAY_PORT=8080
     depends_on:
-      - replica1
-      - replica2
-      - replica3
+      replica1:
+        condition: service_healthy
+      replica2:
+        condition: service_healthy
+      replica3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   replica1:
     container_name: node1
-    image: cosmtrek/air:latest
+    build:
+      context: ./replica1
+      dockerfile: Dockerfile
     working_dir: /app
     ports:
       - "9001:9001"
@@ -53,10 +72,18 @@ services:
       - REPLICA_ID=replica1
       - PORT=9001
       - PEERS=http://replica2:9002,http://replica3:9003
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   replica2:
     container_name: node2
-    image: cosmtrek/air:latest
+    build:
+      context: ./replica2
+      dockerfile: Dockerfile
     working_dir: /app
     ports:
       - "9002:9002"
@@ -66,10 +93,18 @@ services:
       - REPLICA_ID=replica2
       - PORT=9002
       - PEERS=http://replica1:9001,http://replica3:9003
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   replica3:
     container_name: node3
-    image: cosmtrek/air:latest
+    build:
+      context: ./replica3
+      dockerfile: Dockerfile
     working_dir: /app
     ports:
       - "9003:9003"
@@ -79,6 +114,12 @@ services:
       - REPLICA_ID=replica3
       - PORT=9003
       - PEERS=http://replica1:9001,http://replica2:9002
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9003/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
 networks:
   default:

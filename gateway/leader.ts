@@ -6,6 +6,7 @@ type FetchImpl = typeof fetch;
 export type LeaderSource = {
   getLeaderUrl(): string | null;
   getClusterStatus(): { peer: string; status: NodeStatus }[];
+  refreshLeader(): Promise<string | null>;
 };
 
 type LeaderTrackerOptions = {
@@ -38,7 +39,9 @@ export class LeaderTracker implements LeaderSource {
     peers,
     fetchImpl = fetch,
     logger = console,
-    pollIntervalMs = 2000,
+    // Poll much faster than the election timeout window so the gateway can
+    // notice a new leader shortly after a failover instead of serving stale routes.
+    pollIntervalMs = 300,
     requestTimeoutMs = 500,
   }: LeaderTrackerOptions) {
     this.peers = peers;
@@ -84,7 +87,11 @@ export class LeaderTracker implements LeaderSource {
       .sort((left, right) => right.status.term - left.status.term)[0];
 
     if (!nextLeader) {
-      return;
+      // Clear stale leader info when no replica currently reports leadership.
+      // This forces callers to refresh instead of continuing to target an old leader.
+      this.leaderId = null;
+      this.leaderUrl = null;
+      return null;
     }
 
     const { peer, status } = nextLeader;
@@ -97,6 +104,8 @@ export class LeaderTracker implements LeaderSource {
     if (changedLeader) {
       this.logger.log(`[Gateway] Found Leader: ${peer} (Term ${status.term})`);
     }
+
+    return this.leaderUrl;
   }
 
   /**
@@ -132,5 +141,11 @@ export class LeaderTracker implements LeaderSource {
 
   getClusterStatus() {
     return this.clusterStatus;
+  }
+
+  async refreshLeader() {
+    // Used by the WebSocket path after a failed request so we can re-discover
+    // leadership immediately instead of waiting for the next background poll.
+    return this.pollOnce();
   }
 }

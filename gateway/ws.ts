@@ -82,6 +82,17 @@ export function setupWebSocket(
   tracker: LeaderSource,
   { fetchImpl = fetch, logger = console }: WebSocketOptions = {},
 ): WSEvents {
+  const resolveLeader = async () => {
+    const existingLeader = tracker.getLeaderUrl();
+    if (existingLeader) {
+      return existingLeader;
+    }
+
+    // If the cache is empty, force an immediate leader lookup.
+    // This avoids waiting for the next polling tick before serving the request.
+    return tracker.refreshLeader();
+  };
+
   return {
     /**
      * onOpen: Triggered when a new user connects via WebSocket.
@@ -92,15 +103,21 @@ export function setupWebSocket(
       // Track this client for broadcasting
       clientManager.add(ws);
 
-      const leaderUrl = tracker.getLeaderUrl();
-      if (!leaderUrl) {
-        logger.error("[WebSocket] No leader available to fetch history");
-        return;
-      }
+      void resolveLeader()
+        .then((leaderUrl) => {
+          if (!leaderUrl) {
+            throw new Error("no leader available to fetch history");
+          }
 
-      // Fetch and send stroke history to the new client
-      void fetchImpl(`${leaderUrl}/log`)
-        .then((response) => response.json())
+          return fetchImpl(`${leaderUrl}/log`);
+        })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`history fetch failed with status ${response.status}`);
+          }
+
+          return response.json();
+        })
         .then((data: unknown) => {
           const typedData = data as { entries?: unknown[] };
           const historyMessage = JSON.stringify({ 
@@ -128,26 +145,41 @@ export function setupWebSocket(
 
         // Validate stroke data with Zod schema
         const validStroke = StrokeSchema.parse(payload.stroke);
-        const leaderUrl = tracker.getLeaderUrl();
+        let leaderUrl = await resolveLeader();
 
         if (!leaderUrl) {
           logger.error("[WebSocket] No leader available to accept stroke");
           return;
         }
 
-        // Forward the stroke to the RAFT Leader
-        // The Leader will replicate it to Followers via AppendEntries
-        const response = await fetchImpl(`${leaderUrl}/stroke`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(validStroke),
-        });
+        const forwardStroke = async (targetLeaderUrl: string) => {
+          const response = await fetchImpl(`${targetLeaderUrl}/stroke`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(validStroke),
+          });
 
-        const data = await response.json() as { committed?: boolean };
+          const data = await response.json() as { committed?: boolean };
+          return { response, data };
+        };
+
+        // Forward the stroke to the RAFT Leader.
+        let { response, data } = await forwardStroke(leaderUrl);
+
+        // A failover can happen after we read the cached leader but before the POST lands.
+        // Refresh leadership immediately and retry once so transient leader changes do not
+        // drop the user's stroke during the election/recovery window.
+        if (!response.ok || !data.committed) {
+          const refreshedLeaderUrl = await tracker.refreshLeader();
+          if (refreshedLeaderUrl && refreshedLeaderUrl !== leaderUrl) {
+            leaderUrl = refreshedLeaderUrl;
+            ({ response, data } = await forwardStroke(leaderUrl));
+          }
+        }
 
         // Only broadcast after RAFT commits (majority ACK)
         // This ensures all clients see consistent, committed data
-        if (data.committed) {
+        if (response.ok && data.committed) {
           const broadcastMessage = JSON.stringify({ 
             type: "stroke", 
             stroke: validStroke 

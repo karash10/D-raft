@@ -124,6 +124,7 @@ export function useWebSocket({
   
   /** Timeout ID for scheduled reconnection attempts. */
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptRef = useRef<() => void>(() => {});
   
   /**
    * Refs for callbacks to avoid stale closures.
@@ -225,10 +226,14 @@ export function useWebSocket({
           reconnectDelayRef.current * 2,
           MAX_RECONNECT_DELAY
         );
-        connect();
+        reconnectAttemptRef.current();
       }, delay);
     };
   }, [url]);
+
+  useEffect(() => {
+    reconnectAttemptRef.current = connect;
+  }, [connect]);
 
   /**
    * Manual reconnect - useful for "Retry" buttons in the UI.
@@ -257,10 +262,13 @@ export function useWebSocket({
   // -------------------------------------------------------------------------
 
   useEffect(() => {
-    connect();
+    const timeoutId = setTimeout(() => {
+      connect();
+    }, 0);
 
     // Cleanup: close connection and cancel pending reconnects
     return () => {
+      clearTimeout(timeoutId);
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }

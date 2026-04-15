@@ -30,7 +30,7 @@ export default function Dashboard() {
           a.status.replicaId.localeCompare(b.status.replicaId)
         );
         setNodes(sortedNodes);
-      } catch (error) {
+      } catch {
         // Silently ignore polling errors if gateway is down
       }
     };
@@ -56,7 +56,7 @@ export default function Dashboard() {
              Discovering RAFT Nodes...
            </div>
         ) : (
-          nodes.map(({ peer, status }) => {
+          nodes.map(({ status }) => {
             const isLeader = status.state === 'LEADER';
             return (
               <div 

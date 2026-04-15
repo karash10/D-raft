@@ -28,7 +28,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useWebSocket, type Stroke, type LogEntry } from '../hooks/useWebSocket'
 import Toolbar from './Toolbar'
-import Dashboard from './Dashboard'
 
 
 const CANVAS_BG_COLOR = '#fefefe'
@@ -122,12 +121,14 @@ export default function Canvas() {
 
     console.log(`[Canvas] Rendering ${entries.length} historical strokes`)
 
-    // Store and render each historical stroke
-    for (const entry of entries) {
-      strokesRef.current.push(entry.stroke)
-      drawStroke(ctx, entry.stroke)
-    }
-  }, [drawStroke])
+    // Replace local history with the committed cluster history.
+    // This avoids duplicating strokes after reconnects or gateway restarts.
+    strokesRef.current = entries.map((entry) => entry.stroke)
+
+    const width = canvas.clientWidth
+    const height = canvas.clientHeight
+    redrawAllStrokes(ctx, width, height)
+  }, [redrawAllStrokes])
 
   /**
    * Called when another user's stroke is received.
@@ -178,7 +179,9 @@ export default function Canvas() {
       canvas.width = width * dpr
       canvas.height = height * dpr
 
-      // Scale context to match DPI
+      // Reset the transform before applying DPR scaling.
+      // Otherwise repeated resizes keep multiplying the coordinate system.
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.scale(dpr, dpr)
 
       // Set display size via CSS

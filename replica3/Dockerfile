@@ -49,7 +49,10 @@ FROM golang:1.25
 
 # Install Air for hot-reloading
 # Air is a live-reload tool for Go applications
-RUN go install github.com/air-verse/air@latest
+RUN apt-get update \
+	&& apt-get install -y curl \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& go install github.com/air-verse/air@latest
 
 # Set the working directory
 WORKDIR /app

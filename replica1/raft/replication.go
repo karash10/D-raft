@@ -545,10 +545,7 @@ func (n *Node) syncFollowerLog(peerURL string, leaderTerm int) {
 
 	// Only send committed entries during catch-up.
 	// Uncommitted entries must stay local until they reach quorum.
-	committedCount := n.CommitIndex
-	if committedCount > len(n.Log.Entries) {
-		committedCount = len(n.Log.Entries)
-	}
+	committedCount := min(n.CommitIndex, len(n.Log.Entries))
 
 	entries := make([]LogEntry, committedCount)
 	copy(entries, n.Log.Entries[:committedCount])

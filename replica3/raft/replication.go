@@ -449,14 +449,14 @@ func (n *Node) ReplicateEntry(stroke Stroke) (bool, error) {
 	n.Mu.Unlock()
 
 	// Replicate to all peers in parallel
-	var wg sync.WaitGroup
-	var successMu sync.Mutex
-	successCount := 1 // We count ourselves as a success
+	successChan := make(chan bool, len(peers))
 
 	for _, peerURL := range peers {
-		wg.Add(1)
 		go func(url string) {
-			defer wg.Done()
+			success := false
+			defer func() {
+				successChan <- success
+			}()
 
 			// Get the prevLogIndex and prevLogTerm for this peer
 			n.Mu.Lock()
@@ -493,10 +493,7 @@ func (n *Node) ReplicateEntry(stroke Stroke) (bool, error) {
 			n.Mu.Unlock()
 
 			if resp.Success {
-				successMu.Lock()
-				successCount++
-				successMu.Unlock()
-
+				success = true
 				// Update matchIndex for this peer
 				n.Mu.Lock()
 				if n.LeaderState != nil {
@@ -505,20 +502,91 @@ func (n *Node) ReplicateEntry(stroke Stroke) (bool, error) {
 				n.Mu.Unlock()
 			} else {
 				// AppendEntries failed - peer's log is inconsistent
-				// We need to trigger a sync-log for this peer
 				n.Logger.Printf("term=%d state=LEADER event=replication_rejected peer=%s logLength=%d",
 					currentTerm, url, resp.LogLength)
 
-				// Attempt to sync the follower's log
-				go n.syncFollowerLog(url, currentTerm)
+				if !n.syncFollowerLog(url, currentTerm) {
+					return
+				}
+
+				n.Mu.Lock()
+				nextIdx := newEntry.Index
+				if n.LeaderState != nil {
+					nextIdx = n.LeaderState.NextIndex[url]
+				}
+				if nextIdx < 1 {
+					nextIdx = 1
+				}
+				if nextIdx > len(n.Log.Entries)+1 {
+					nextIdx = len(n.Log.Entries) + 1
+				}
+
+				var retryEntries []LogEntry
+				if nextIdx <= len(n.Log.Entries) {
+					retryEntries = make([]LogEntry, len(n.Log.Entries[nextIdx-1:]))
+					copy(retryEntries, n.Log.Entries[nextIdx-1:])
+				} else {
+					retryEntries = []LogEntry{}
+				}
+
+				retryPrevLogIndex := nextIdx - 1
+				retryPrevLogTerm := 0
+				if retryPrevLogIndex > 0 && retryPrevLogIndex <= len(n.Log.Entries) {
+					retryPrevLogTerm = n.Log.Entries[retryPrevLogIndex-1].Term
+				}
+
+				retryReq := AppendEntriesRequest{
+					Term:         currentTerm,
+					LeaderId:     leaderId,
+					PrevLogIndex: retryPrevLogIndex,
+					PrevLogTerm:  retryPrevLogTerm,
+					Entries:      retryEntries,
+					LeaderCommit: leaderCommit,
+				}
+				n.Mu.Unlock()
+
+				retryResp, retryErr := n.sendAppendEntries(url, retryReq)
+				if retryErr != nil {
+					n.Logger.Printf("term=%d state=LEADER event=replication_retry_failed peer=%s error=%v",
+						currentTerm, url, retryErr)
+					return
+				}
+
+				n.Mu.Lock()
+				if retryResp.Term > n.CurrentTerm {
+					n.BecomeFollower(retryResp.Term)
+					n.Mu.Unlock()
+					return
+				}
+				n.Mu.Unlock()
+
+				if retryResp.Success {
+					success = true
+					n.Mu.Lock()
+					if n.LeaderState != nil {
+						n.LeaderState.MatchIndex[url] = newEntry.Index
+						n.LeaderState.NextIndex[url] = newEntry.Index + 1
+					}
+					n.Mu.Unlock()
+					n.Logger.Printf("term=%d state=LEADER event=replication_retry_succeeded peer=%s index=%d",
+						currentTerm, url, newEntry.Index)
+				}
 			}
 		}(peerURL)
 	}
 
-	wg.Wait()
-
-	// Check if we achieved majority
+	successCount := 1 // We count ourselves as a success
 	majority := (len(peers)+1)/2 + 1
+
+	for i := 0; i < len(peers); i++ {
+		if <-successChan {
+			successCount++
+		}
+		if successCount >= majority {
+			break
+		}
+	}
+
 	committed := successCount >= majority
 
 	if committed {
@@ -536,11 +604,11 @@ func (n *Node) ReplicateEntry(stroke Stroke) (bool, error) {
 
 // syncFollowerLog sends a SyncLog RPC to bring a follower up to date.
 // This is called when AppendEntries fails due to log inconsistency.
-func (n *Node) syncFollowerLog(peerURL string, leaderTerm int) {
+func (n *Node) syncFollowerLog(peerURL string, leaderTerm int) bool {
 	n.Mu.Lock()
 	if n.State != Leader || n.CurrentTerm != leaderTerm {
 		n.Mu.Unlock()
-		return
+		return false
 	}
 
 	// Only send committed entries during catch-up.
@@ -563,7 +631,7 @@ func (n *Node) syncFollowerLog(peerURL string, leaderTerm int) {
 	if err != nil {
 		n.Logger.Printf("term=%d state=LEADER event=sync_log_failed peer=%s error=%v",
 			leaderTerm, peerURL, err)
-		return
+		return false
 	}
 
 	if resp.Success {
@@ -577,7 +645,10 @@ func (n *Node) syncFollowerLog(peerURL string, leaderTerm int) {
 			n.LeaderState.NextIndex[peerURL] = resp.SyncedUpTo + 1
 		}
 		n.Mu.Unlock()
+		return true
 	}
+
+	return false
 }
 
 // NETWORK HELPERS

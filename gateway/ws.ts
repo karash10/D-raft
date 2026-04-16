@@ -39,19 +39,15 @@ class ClientManager {
   }
 
   /**
-   * Broadcast a message to all clients EXCEPT the sender.
-   * This is the key function for real-time sync - when one user draws,
-   * all other users see the stroke immediately.
+   * Broadcast a message to all connected clients.
+   * We include the sender so every browser renders only committed strokes
+   * from the gateway and stays visually consistent during failover.
    * 
    * @param message - JSON string to send
-   * @param sender - The client who sent the original stroke (excluded from broadcast)
    */
-  broadcast(message: string, sender?: WSContext) {
+  broadcast(message: string) {
     let sentCount = 0;
     for (const client of this.clients) {
-      // Skip the sender - they already drew the stroke locally
-      if (client === sender) continue;
-      
       try {
         client.send(message);
         sentCount++;
@@ -185,9 +181,9 @@ export function setupWebSocket(
             stroke: validStroke 
           });
           
-          // Send to all clients EXCEPT the sender
-          // The sender already drew the stroke locally (optimistic UI)
-          clientManager.broadcast(broadcastMessage, ws);
+          // Send committed strokes to every client, including the sender.
+          // This keeps all tabs in sync even if failover caused some writes to miss commit.
+          clientManager.broadcast(broadcastMessage);
         } else {
           logger.error("[WebSocket] Stroke not committed by RAFT");
         }

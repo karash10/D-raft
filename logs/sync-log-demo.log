@@ -1,1 +1,11 @@
-# captured sync-log catch-up logs from a live run before submission.
+# Sync Log Catch-Up Demonstration
+# Scenario: replica3 was offline. It rejoins the cluster while replica1 is the Leader and receives immediately catches up to index 45.
+
+[replica1] 2026/04/20 10:30:01 term=4 state=LEADER event=heartbeat_sent peers=2
+[replica3] 2026/04/20 10:30:02 term=4 state=FOLLOWER event=append_entries_rejected reason=log_too_short prevLogIndex=45 ourLogLength=0 sender=replica1
+[replica1] 2026/04/20 10:30:02 term=4 state=LEADER event=replication_rejected peer=http://replica3:9003 logLength=0
+[replica1] 2026/04/20 10:30:02 term=4 state=LEADER event=sync_log_sent peer=http://replica3:9003 syncedUpTo=44
+[replica3] 2026/04/20 10:30:02 term=4 state=FOLLOWER event=sync_log_received entriesCount=44 syncedUpTo=44
+[replica1] 2026/04/20 10:30:02 term=4 state=LEADER event=replication_retry_succeeded peer=http://replica3:9003 index=45
+[replica3] 2026/04/20 10:30:02 term=4 state=FOLLOWER event=entry_appended index=45 entryTerm=4
+[replica3] 2026/04/20 10:30:02 term=4 state=FOLLOWER event=commit_index_updated newCommitIndex=45

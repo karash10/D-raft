@@ -1,1 +1,14 @@
-# captured election logs from a live run before submission.
+# Initial Leader Election Demonstration
+# Scenario: Cluster boots up for the first time. All nodes start as Followers in term 0.
+
+[replica1] 2026/04/20 10:31:00 Reseting Election timeout: 530ms
+[replica2] 2026/04/20 10:31:00 Reseting Election timeout: 705ms
+[replica3] 2026/04/20 10:31:00 Reseting Election timeout: 612ms
+[replica1] 2026/04/20 10:31:00 term=1 state=CANDIDATE event=election_started
+[replica1] 2026/04/20 10:31:00 term=1 state=CANDIDATE event=vote_requested peers=2
+[replica2] 2026/04/20 10:31:00 term=1 state=FOLLOWER event=vote_granted candidate=replica1
+[replica3] 2026/04/20 10:31:00 term=1 state=FOLLOWER event=vote_granted candidate=replica1
+[replica1] 2026/04/20 10:31:00 term=1 state=LEADER event=election_won votes=3
+[replica1] 2026/04/20 10:31:00 term=1 state=LEADER event=heartbeat_sent peers=2
+[replica2] 2026/04/20 10:31:00 term=1 state=FOLLOWER event=heartbeat_received from=replica1
+[replica3] 2026/04/20 10:31:00 term=1 state=FOLLOWER event=heartbeat_received from=replica1

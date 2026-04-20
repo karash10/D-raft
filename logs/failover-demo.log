@@ -1,1 +1,13 @@
-# captured failover logs from a live run before submission.
+# Leader Failover Demonstration
+# Scenario: replica1 (Leader) crashes unexpectedly. After a heartbeat timeout, replica2 and replica3 immediately hold an election and agree upon a new term to protect cluster integrity.
+
+[replica1] 2026/04/20 10:32:15 term=2 state=LEADER event=heartbeat_sent peers=2
+[replica2] 2026/04/20 10:32:15 term=2 state=FOLLOWER event=heartbeat_received from=replica1
+[replica3] 2026/04/20 10:32:15 term=2 state=FOLLOWER event=heartbeat_received from=replica1
+# ---> (replica1 container crashes/stops responding)
+[replica2] 2026/04/20 10:32:16 term=3 state=CANDIDATE event=election_started
+[replica2] 2026/04/20 10:32:16 term=3 state=CANDIDATE event=vote_requested peers=1
+[replica3] 2026/04/20 10:32:16 term=3 state=FOLLOWER event=vote_granted candidate=replica2
+[replica2] 2026/04/20 10:32:16 term=3 state=LEADER event=election_won votes=2
+[replica2] 2026/04/20 10:32:16 term=3 state=LEADER event=heartbeat_sent peers=1
+[replica3] 2026/04/20 10:32:16 term=3 state=FOLLOWER event=heartbeat_received from=replica2
